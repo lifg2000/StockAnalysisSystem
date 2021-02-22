@@ -112,8 +112,9 @@ class StrategyEntry:
         if not isinstance(securities, list):
             securities = [securities]
 
-        for analyzer in analyzers:
-            progress_rate.set_progress(analyzer, 0, len(securities))
+        if progress_rate is not None:
+            for analyzer in analyzers:
+                progress_rate.set_progress(analyzer, 0, len(securities))
 
         # Remove microsecond to avoid mongodb query fail.
         # time_serial = [t.replace(microsecond=0)  for t in time_serial]
@@ -127,12 +128,14 @@ class StrategyEntry:
                 clock.reset()
                 with open(path.join(dump_path, analyzer + '.json'), 'rt') as f:
                     result = analysis_results_from_json(f)
+                if result is not None and len(result) > 0:
+                    total_result.extend(result)
                 print('Analyzer %s : Load json finished, time spending: %ss' % (analyzer, clock.elapsed_s()))
             else:
                 if enable_from_cache:
                     df = self.result_from_cache('Result.Analyzer', analyzer=analyzer,
                                                 identity=securities, time_serial=time_serial)
-                    result = analysis_dataframe_to_list(df)
+                    result = analysis_result_dataframe_to_list(df)
 
                     if result is None or len(result) == 0:
                         result = None
@@ -170,12 +173,40 @@ class StrategyEntry:
                         print('Analyzer %s : Cache result, time spending: %ss' % (analyzer, clock.elapsed_s()))
         return total_result
 
+    # ------------------------------------------------- Export / Import ------------------------------------------------
+
+    @staticmethod
+    def dump_analysis_report(result_list: [AnalysisResult], export_path: str):
+        def default_dump(obj: AnalysisResult):
+            if not isinstance(obj, AnalysisResult):
+                print('Warning: Not an AnalysisResult object.')
+                return {}
+            return obj.pack(True)
+        with open(export_path, 'wt') as f:
+            json.dump(result_list, f, default=default_dump)
+
+    @staticmethod
+    def load_analysis_report(import_path: str) -> [AnalysisResult]:
+        def handle_object(d: dict):
+            ar = AnalysisResult()
+            ar.unpack(d)
+            return ar
+        result = []
+        with open(import_path, 'rt') as f:
+            result = json.load(f, object_hook=handle_object)
+        return result
+
+    def dump_strategy_name_dict(self, export_path: str):
+        name_dict = self.strategy_name_dict()
+        with open(export_path, 'wt') as f:
+            json.dump(name_dict, f)
+
     # ----------------------------------------------------- Report -----------------------------------------------------
 
     def generate_report_excel_common(self, result_list: [AnalysisResult], report_path: str,
                                      extra_data: pd.DataFrame = None):
         # ------------ Parse to Table ------------
-        result_table = analysis_result_list_to_table(result_list)
+        result_table = analysis_result_list_to_analyzer_security_table(result_list)
 
         # ------------- Collect Info -------------
         stock_list = self.__data_hub.get_data_utility().get_stock_list()

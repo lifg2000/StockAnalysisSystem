@@ -1,7 +1,7 @@
-pyqt5
+# pyqt5
 # pyqtgraph
-pyqtgraph==0.11.0rc0
-pyqtwebengine
+# pyqtgraph==0.11.0rc0
+# pyqtwebengine
 bs4
 lxml
 requests
@@ -16,7 +16,7 @@ requests_html
 PyExecJS
 twine
 tornado
-py2exe
+# py2exe
 baostock
 h5py
 flask

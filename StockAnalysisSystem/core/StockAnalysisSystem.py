@@ -25,8 +25,7 @@ class StockAnalysisSystem(metaclass=ThreadSafeSingleton):
         self.__root_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.__project_path = self.__root_path
 
-        from .config import Config
-        self.__config = Config()
+        self.__config = None
         self.__task_queue = TaskQueue()
 
         self.__plugin_table = {}
@@ -36,7 +35,7 @@ class StockAnalysisSystem(metaclass=ThreadSafeSingleton):
         self.__database_entry = None
         self.__factor_center = None
 
-        self.__extension_manager = None
+        # self.__extension_manager = None
 
         self.__sys_call = {}
 
@@ -78,7 +77,7 @@ class StockAnalysisSystem(metaclass=ThreadSafeSingleton):
     def is_initialized(self) -> bool:
         return self.__inited
 
-    def check_initialize(self, project_path: str = '', not_load_config: bool = False) -> bool:
+    def check_initialize(self, project_path: str = '', config=None, not_load_config: bool = False) -> bool:
         if self.__inited:
             return True
 
@@ -102,12 +101,19 @@ class StockAnalysisSystem(metaclass=ThreadSafeSingleton):
         clock = Clock()
         self.__log_errors = []
 
+        from .config import Config
         from .DataHubEntry import DataHubEntry
         from .AnalyzerEntry import StrategyEntry
         from .Database.DatabaseEntry import DatabaseEntry
         from .Utiltity.plugin_manager import PluginManager
 
-        if not not_load_config:
+        if isinstance(config, Config):
+            self.__config = config
+        else:
+            self.__config = Config()
+        if not_load_config:
+            pass
+        else:
             if not self.__config.load_config(config_file_path):
                 self.__log_errors.append('Load config fail.')
                 return False
@@ -144,12 +150,12 @@ class StockAnalysisSystem(metaclass=ThreadSafeSingleton):
         factor_plugin = PluginManager()
         strategy_plugin = PluginManager()
         collector_plugin = PluginManager()
-        extension_plugin = PluginManager()
+        # extension_plugin = PluginManager()
 
         self.__plugin_table['Factor'] = factor_plugin
         self.__plugin_table['Analyzer'] = strategy_plugin
         self.__plugin_table['Collector'] = collector_plugin
-        self.__plugin_table['Extension'] = extension_plugin
+        # self.__plugin_table['Extension'] = extension_plugin
 
         default_plugin_path = os.path.join(self.get_root_path(), 'plugin')
         project_plugin_path = os.path.join(self.get_project_path(), 'plugin')
@@ -160,7 +166,7 @@ class StockAnalysisSystem(metaclass=ThreadSafeSingleton):
             factor_plugin.add_plugin_path(os.path.join(default_plugin_path, 'Factor'))
             strategy_plugin.add_plugin_path(os.path.join(default_plugin_path, 'Analyzer'))
             collector_plugin.add_plugin_path(os.path.join(default_plugin_path, 'Collector'))
-            extension_plugin.add_plugin_path(os.path.join(default_plugin_path, 'Extension'))
+            # extension_plugin.add_plugin_path(os.path.join(default_plugin_path, 'Extension'))
         else:
             print('Default plugin not found.')
 
@@ -169,7 +175,7 @@ class StockAnalysisSystem(metaclass=ThreadSafeSingleton):
             factor_plugin.add_plugin_path(os.path.join(project_plugin_path, 'Factor'))
             strategy_plugin.add_plugin_path(os.path.join(project_plugin_path, 'Analyzer'))
             collector_plugin.add_plugin_path(os.path.join(project_plugin_path, 'Collector'))
-            extension_plugin.add_plugin_path(os.path.join(project_plugin_path, 'Extension'))
+            # extension_plugin.add_plugin_path(os.path.join(project_plugin_path, 'Extension'))
 
         factor_plugin.refresh()
         strategy_plugin.refresh()
@@ -187,9 +193,10 @@ class StockAnalysisSystem(metaclass=ThreadSafeSingleton):
         # TODO: Refactor
         self.__data_hub_entry.get_data_center().set_factor_center(self.__factor_center)
 
-        from .ExtensionEntry import ExtensionManager
-        self.__extension_manager = ExtensionManager(self, extension_plugin)
-        self.__extension_manager.init()
+        # TODO: Separate extension ui and data
+        # from .ExtensionEntry import ExtensionManager
+        # self.__extension_manager = ExtensionManager(self, extension_plugin)
+        # self.__extension_manager.init()
 
         self.__task_queue.start()
 
@@ -218,8 +225,8 @@ class StockAnalysisSystem(metaclass=ThreadSafeSingleton):
     def get_strategy_entry(self):
         return self.__strategy_entry if self.check_initialize() else None
 
-    def get_extension_manager(self):
-        return self.__extension_manager if self.check_initialize() else None
+    # def get_extension_manager(self):
+    #     return self.__extension_manager if self.check_initialize() else None
 
     def get_factor_center(self):
         return self.__factor_center if self.check_initialize() else None

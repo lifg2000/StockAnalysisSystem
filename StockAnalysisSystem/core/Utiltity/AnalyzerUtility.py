@@ -7,8 +7,6 @@ import pandas as pd
 from .common import *
 from .df_utility import *
 from .time_utility import *
-from ..DataHubEntry import DataHubEntry
-from ..Database.DatabaseEntry import DatabaseEntry
 
 
 def methods_from_prob(prob: dict) -> []:
@@ -122,6 +120,8 @@ class AnalysisResult:
 
 # --------------------------------------------- Analysis Result Conversion ---------------------------------------------
 
+# ----------------------- Analysis Result List <--> Json -----------------------
+
 def analysis_results_to_json(result_list: [AnalysisResult], fp=None) -> bool or str:
     def _analysis_result_json_hook(analysis_result: AnalysisResult) ->dict:
         if isinstance(analysis_result, AnalysisResult):
@@ -144,7 +144,10 @@ def analysis_results_from_json(fp) -> [AnalysisResult]:
         return json.load(fp, object_hook=_json_analysis_result_hook)
 
 
-def analysis_result_list_to_table(result_list: [AnalysisResult]) -> {str: {str: [AnalysisResult]}}:
+# -------------------- Analysis Result List --> Group/Select --------------------
+
+def analysis_result_list_to_analyzer_security_table(
+        result_list: [AnalysisResult], converter=None) -> {str: {str: [AnalysisResult or any]}}:
     result_table = OrderedDict()
     for analysis_result in result_list:
         analyzer_uuid = analysis_result.method
@@ -153,8 +156,50 @@ def analysis_result_list_to_table(result_list: [AnalysisResult]) -> {str: {str: 
             result_table[analyzer_uuid] = OrderedDict()
         if stock_identity not in result_table[analyzer_uuid].keys():
             result_table[analyzer_uuid][stock_identity] = []
-        result_table[analyzer_uuid][stock_identity].append(analysis_result)
+        if converter is None:
+            result_table[analyzer_uuid][stock_identity].append(analysis_result)
+        else:
+            result_table[analyzer_uuid][stock_identity].append(converter(analysis_result))
     return result_table
+
+
+def analysis_result_list_to_security_analyzer_table(
+        result_list: [AnalysisResult], converter=None) -> {str: {str: [AnalysisResult or any]}}:
+    result_table = OrderedDict()
+    for analysis_result in result_list:
+        analyzer_uuid = analysis_result.method
+        stock_identity = analysis_result.securities
+        if stock_identity not in result_table.keys():
+            result_table[stock_identity] = OrderedDict()
+        if analyzer_uuid not in result_table[stock_identity].keys():
+            result_table[stock_identity][analyzer_uuid] = []
+        if converter is None:
+            result_table[stock_identity][analyzer_uuid].append(analysis_result)
+        else:
+            result_table[stock_identity][analyzer_uuid].append(converter(analysis_result))
+    return result_table
+
+
+def group_analysis_report_by_analyzer(result_list: [AnalysisResult]) -> {str: [AnalysisResult]}:
+    analyzer_result_group = {}
+    for analysis_result in result_list:
+        analyzer_uuid = analysis_result.method
+        if analyzer_uuid not in analyzer_result_group.keys():
+            analyzer_result_group[analyzer_uuid] = [analysis_result]
+        else:
+            analyzer_result_group[analyzer_uuid].append(analysis_result)
+    return analyzer_result_group
+
+
+def group_analysis_report_by_securities(result_list: [AnalysisResult]) -> {str: [AnalysisResult]}:
+    security_result_group = {}
+    for analysis_result in result_list:
+        identity = analysis_result.securities
+        if identity in security_result_group.keys():
+            security_result_group[identity].append(analysis_result)
+        else:
+            security_result_group[identity] = [analysis_result]
+    return security_result_group
 
 
 def get_security_result_from_analysis_result_list(result_list: [AnalysisResult],
@@ -167,18 +212,10 @@ def get_security_result_from_analysis_result_list(result_list: [AnalysisResult],
     return security_result_list
 
 
-def analysis_result_list_to_single_stock_report(result_list: [AnalysisResult], stock_ideneity: str) -> pd.DataFrame:
-    security_result_list = get_security_result_from_analysis_result_list(result_list, stock_ideneity)
-    result_table = {}
-    for analysis_result in security_result_list:
-        analyzer_uuid = analysis_result.method
-        if analyzer_uuid not in result_table.keys():
-            result_table[analyzer_uuid] = [analysis_result]
-        else:
-            result_table[analyzer_uuid].append(analysis_result)
-    result_report = None
+# --------------------- Analysis Result List <--> DataFrame ---------------------
 
-    # TODO: Check Duplicate: {"period" : ISODate("2015-12-31T00:00:00Z"),"stock_identity" : "600103.SSE", "method":"7e132f82-a28e-4aa9-aaa6-81fa3692b10c"}
+def analyzer_table_to_dataframe(result_table: {str: [AnalysisResult]}) -> pd.DataFrame:
+    result_table_processed = {}
     for analyzer_uuid, result_list in result_table.items():
         # content = [r.reason + ' | ' + str(r.score) for r in result_list]
         # indexes = [r.period for r in result_list]
@@ -194,13 +231,22 @@ def analysis_result_list_to_single_stock_report(result_list: [AnalysisResult], s
         s = pd.Series(content, index=indexes)
         s.name = analyzer_uuid
 
-        df = s.to_frame()
-        df = df.groupby(df.index).first()
-        result_report = df if result_report is None else pd.concat([result_report, df], axis=1)
+        result_table_processed[analyzer_uuid] = s
+
+        # df = s.to_frame()
+        # df = df.groupby(df.index).first()
+        # result_report = df if result_report is None else pd.concat([result_report, df], axis=1)
+
+    result_report = pd.DataFrame(result_table_processed)
     return result_report.sort_index(ascending=False)
 
 
-def analysis_dataframe_to_list(df: pd.DataFrame) -> [AnalysisResult]:
+def analysis_result_list_to_dataframe(result_list: [AnalysisResult]) -> pd.DataFrame:
+    result_table = group_analysis_report_by_analyzer(result_list)
+    return analyzer_table_to_dataframe(result_table)
+
+
+def analysis_result_dataframe_to_list(df: pd.DataFrame) -> [AnalysisResult]:
     if df is None or df.empty:
         return []
 
@@ -223,6 +269,13 @@ def analysis_dataframe_to_list(df: pd.DataFrame) -> [AnalysisResult]:
     return result_list
 
 
+# --------------------------------- Compatible ---------------------------------
+
+def analysis_result_list_to_single_stock_report(result_list: [AnalysisResult], stock_ideneity: str) -> pd.DataFrame:
+    security_result_list = get_security_result_from_analysis_result_list(result_list, stock_ideneity)
+    return analysis_result_list_to_dataframe(security_result_list)
+
+
 # ----------------------------------------------------------------------------------------------------------------------
 
 class AnalysisContext:
@@ -235,23 +288,23 @@ class AnalysisContext:
 
 # ----------------------------------------------------------------------------------------------------------------------
 
-def function_entry_example(securities: str, time_serial: tuple, data_hub: DataHubEntry,
-                           database: DatabaseEntry, context: AnalysisContext, **kwargs) -> AnalysisResult:
-    """
-    The example of analyzer function entry.
-    :param securities: A single securities code, should be a str.
-    :param time_serial: The analysis period
-    :param data_hub:  DataHubEntry type
-    :param database: DatabaseEntry type
-    :param context: AnalysisContext type, which can hold cache data for multiple analysis
-    :return: AnalysisResult
-    """
-    pass
-
-
-method_list_example = [
-    ('5c496d06-9961-4157-8d3e-a90683d6d32c', 'analyzer brief', 'analyzer details', function_entry_example),
-]
+# def function_entry_example(securities: str, time_serial: tuple, data_hub: DataHubEntry,
+#                            database: DatabaseEntry, context: AnalysisContext, **kwargs) -> AnalysisResult:
+#     """
+#     The example of analyzer function entry.
+#     :param securities: A single securities code, should be a str.
+#     :param time_serial: The analysis period
+#     :param data_hub:  DataHubEntry type
+#     :param database: DatabaseEntry type
+#     :param context: AnalysisContext type, which can hold cache data for multiple analysis
+#     :return: AnalysisResult
+#     """
+#     pass
+#
+#
+# method_list_example = [
+#     ('5c496d06-9961-4157-8d3e-a90683d6d32c', 'analyzer brief', 'analyzer details', function_entry_example),
+# ]
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -418,8 +471,8 @@ def query_readable_annual_report_pattern(data_hub, uri: str, securities: str, ti
     return df, None
 
 
-def check_industry_in(securities: str, industries: [str], data_hub: DataHubEntry,
-                      database: DatabaseEntry, context: AnalysisContext) -> bool:
+def check_industry_in(securities: str, industries: [str], data_hub,
+                      database, context: AnalysisContext) -> bool:
     nop(database)
 
     if context.cache.get('securities_info', None) is None:
@@ -722,70 +775,6 @@ def generate_analysis_report(result: dict, file_path: str, analyzer_name_dict: d
 
     # Write file
     wb.save(file_path)
-
-
-# --------------------------------------------------------- UI ---------------------------------------------------------
-
-from StockAnalysisSystem.core.Utiltity.ui_utility import *
-from StockAnalysisSystem.core.Utiltity.TableViewEx import *
-
-
-class AnalyzerSelector(QDialog):
-    TABLE_HEADER_ANALYZER = ['', 'Strategy', 'Comments', 'UUID']
-
-    def __init__(self, analyzer_utility):
-        super(AnalyzerSelector, self).__init__()
-        self.__analyzer_utility = analyzer_utility
-        self.__ok = True
-        self.__table_analyzer = TableViewEx()
-        self.__button_ok = QPushButton('OK')
-        self.__button_cancel = QPushButton('Cancel')
-        self.init_ui()
-
-    def init_ui(self):
-        layout = QVBoxLayout()
-        self.setLayout(layout)
-
-        layout.addWidget(self.__table_analyzer)
-        layout.addLayout(horizon_layout([QLabel(''), self.__button_ok, self.__button_cancel], [8, 1, 1]))
-
-        self.__table_analyzer.SetCheckableColumn(0)
-        self.__table_analyzer.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-
-        self.__button_ok.clicked.connect(self.__on_button_ok)
-        self.__button_cancel.clicked.connect(self.__on_button_cancel)
-
-        self.setMinimumSize(800, 600)
-        self.setWindowTitle('Select Analyzer')
-
-        self.load_analyzer()
-
-    def __on_button_ok(self):
-        self.__ok = True
-        self.close()
-
-    def __on_button_cancel(self):
-        self.close()
-
-    def is_ok(self) -> bool:
-        return self.__ok
-
-    def load_analyzer(self):
-        self.__table_analyzer.Clear()
-        self.__table_analyzer.SetRowCount(0)
-        self.__table_analyzer.SetColumn(AnalyzerSelector.TABLE_HEADER_ANALYZER)
-
-        analyzer_info = self.__analyzer_utility.analyzer_info()
-        for analyzer_uuid, analyzer_name, analyzer_detail, _ in analyzer_info:
-            self.__table_analyzer.AppendRow(['', analyzer_name, analyzer_detail, analyzer_uuid])
-
-    def get_select_strategy(self):
-        analyzer_list = []
-        for i in range(self.__table_analyzer.RowCount()):
-            if self.__table_analyzer.GetItemCheckState(i, 0) == QtCore.Qt.Checked:
-                uuid = self.__table_analyzer.GetItemText(i, 3)
-                analyzer_list.append(uuid)
-        return analyzer_list
 
 
 

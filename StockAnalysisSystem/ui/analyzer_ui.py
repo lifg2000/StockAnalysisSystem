@@ -34,8 +34,9 @@ class AnalysisTask(TaskQueue.Task):
     OPTION_UPDATE_CACHE = 16
     OPTION_AUTO = OPTION_CALC | OPTION_FROM_CACHE | OPTION_UPDATE_CACHE
 
-    OPTION_FROM_JSON = 1024
+    OPTION_LOAD_JSON = 1024
     OPTION_DUMP_JSON = 2048
+    OPTION_LOAD_DUMP_ALL = 4096
 
     OPTION_ATTACH_BASIC_INDEX = 4096
 
@@ -78,14 +79,31 @@ class AnalysisTask(TaskQueue.Task):
 
     def analysis(self, securities_list: [str]) -> [AnalysisResult]:
         clock_all = Clock()
-        total_result = self.__strategy.analysis_advance(
-            securities_list, self.__analyzer_list, self.__time_serial,
-            self.__progress_rate,
-            self.__options & AnalysisTask.OPTION_CALC != 0,
-            self.__options & AnalysisTask.OPTION_FROM_CACHE != 0, self.__options & AnalysisTask.OPTION_UPDATE_CACHE != 0,
-            self.__options & AnalysisTask.OPTION_FROM_JSON != 0, self.__options & AnalysisTask.OPTION_DUMP_JSON != 0,
-            os.path.join(StockAnalysisSystem().get_project_path(), 'TestData')
-        )
+        full_dump_path = os.path.join(StockAnalysisSystem().get_project_path(), 'TestData', 'analysis_result.json')
+        if self.__options & AnalysisTask.OPTION_LOAD_JSON != 0 and \
+                self.__options & AnalysisTask.OPTION_LOAD_DUMP_ALL != 0:
+            clock_load = Clock()
+            total_result = self.__strategy.load_analysis_report(full_dump_path)
+            print('Load all analysis result finished, Time spending: %ss' % clock_load.elapsed_s())
+        else:
+            total_result = self.__strategy.analysis_advance(
+                securities_list, self.__analyzer_list, self.__time_serial,
+                self.__progress_rate,
+                self.__options & AnalysisTask.OPTION_CALC != 0,
+                self.__options & AnalysisTask.OPTION_FROM_CACHE != 0, self.__options & AnalysisTask.OPTION_UPDATE_CACHE != 0,
+                self.__options & AnalysisTask.OPTION_LOAD_JSON != 0, self.__options & AnalysisTask.OPTION_DUMP_JSON != 0,
+                os.path.join(StockAnalysisSystem().get_project_path(), 'TestData')
+            )
+
+        if self.__options & AnalysisTask.OPTION_DUMP_JSON != 0 and \
+                self.__options & AnalysisTask.OPTION_LOAD_DUMP_ALL != 0:
+            clock_dump = Clock()
+            name_dict_path = os.path.join(StockAnalysisSystem().get_project_path(),
+                                          'TestData', 'analyzer_names.json')
+            self.__strategy.dump_analysis_report(total_result, full_dump_path)
+            self.__strategy.dump_strategy_name_dict(name_dict_path)
+            print('Dump all analysis result finished, Time spending: %ss' % clock_dump.elapsed_s())
+
         print('All analysis finished, time spending: %ss' % clock_all.elapsed_s())
         return total_result
 
@@ -203,8 +221,9 @@ class AnalyzerUi(QWidget):
         self.__check_force_calc = QCheckBox('Force Calc')
         self.__check_auto_cache = QCheckBox('Cache Result')
 
-        self.__check_from_json = QCheckBox('From Json')
+        self.__check_load_json = QCheckBox('Load Json')
         self.__check_dump_json = QCheckBox('Dump Json')
+        self.__check_load_dump_all = QCheckBox('Load/Dump All')
 
         self.__datetime_time_since = QDateTimeEdit(years_ago(5))
         self.__datetime_time_until = QDateTimeEdit(now())
@@ -247,7 +266,7 @@ class AnalyzerUi(QWidget):
         grid_layout = QGridLayout()
         grid_layout.addWidget(self.__check_force_calc, 0, 0)
         grid_layout.addWidget(self.__check_auto_cache, 1, 0)
-        grid_layout.addWidget(self.__check_from_json, 0, 1)
+        grid_layout.addWidget(self.__check_load_json, 0, 1)
         grid_layout.addWidget(self.__check_dump_json, 1, 1)
 
         grid_layout.addWidget(QLabel(' '), 0, 2)
@@ -259,6 +278,7 @@ class AnalyzerUi(QWidget):
         grid_layout.addWidget(self.__datetime_time_until, 1, 4)
 
         grid_layout.addWidget(self.__check_attach_basic_index, 2, 0, 3, 1)
+        grid_layout.addWidget(self.__check_load_dump_all, 2, 1, 3, 1)
 
         self.__layout_option.addLayout(grid_layout)
 
@@ -291,8 +311,9 @@ class AnalyzerUi(QWidget):
 
         self.__check_force_calc.setToolTip('勾选此项后，程序将不会从缓存中读取分析结果，并强制进行实时计算。')
         self.__check_auto_cache.setToolTip('勾选此项后，程序会自动缓存分析结果到SasCache数据库')
-        self.__check_from_json.setToolTip('仅供Debug：从JSON文件中载入分析结果')
+        self.__check_load_json.setToolTip('仅供Debug：从JSON文件中载入分析结果')
         self.__check_dump_json.setToolTip('仅供Debug：将分析结果写入JSON文件中')
+        self.__check_load_dump_all.setToolTip('仅供Debug：载入/保存所有结果而不是按Analyzer分别载入/保存')
 
         self.__layout_selector.setSpacing(0)
         self.__layout_analyzer.setSpacing(0)
@@ -430,10 +451,12 @@ class AnalyzerUi(QWidget):
         if self.__check_auto_cache.isChecked():
             options |= AnalysisTask.OPTION_UPDATE_CACHE
 
-        if self.__check_from_json.isChecked():
-            options |= AnalysisTask.OPTION_FROM_JSON
+        if self.__check_load_json.isChecked():
+            options |= AnalysisTask.OPTION_LOAD_JSON
         if self.__check_dump_json.isChecked():
             options |= AnalysisTask.OPTION_DUMP_JSON
+        if self.__check_load_dump_all.isChecked():
+            options |= AnalysisTask.OPTION_LOAD_DUMP_ALL
 
         if self.__check_attach_basic_index.isChecked():
             options |= AnalysisTask.OPTION_ATTACH_BASIC_INDEX
@@ -441,6 +464,7 @@ class AnalyzerUi(QWidget):
         time_serial = (to_py_datetime(self.__datetime_time_since.dateTime()),
                        to_py_datetime(self.__datetime_time_until.dateTime()))
 
+        self.__timing_clock.reset()
         task = AnalysisTask(self, self.__strategy_entry, self.__data_hub_entry,
                             self.__selector_list, self.__analyzer_list, time_serial,
                             options, self.__result_output, self.__progress_rate)
@@ -507,12 +531,12 @@ class AnalyzerUi(QWidget):
     #     result2 = self.__strategy_entry.result_from_cache('Result.Analyzer')
     #     print(result2)
     #
-    #     result = analysis_dataframe_to_list(result2)
+    #     result = analysis_result_dataframe_to_list(result2)
     #     print(result)
     #
     #     # ------------ Parse to Table ------------
     #
-    #     result_table = analysis_result_list_to_table(result)
+    #     result_table = analysis_result_list_to_analyzer_security_table(result)
     #
     #     # ----------- Generate report ------------
     #     clock.reset()
